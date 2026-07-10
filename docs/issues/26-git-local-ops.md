@@ -59,15 +59,21 @@ controls (DESIGN §12.1, §16 T-CMD/T-FORCE; ADR-004).
    BEFORE any network call unless `branch.startsWith(branchPrefix)`. The guard reads the
    prefix from an explicit argument (no ambient config) and is not bypassable by any
    flag. Uses `--force-with-lease` only, never `--force`.
-5. Ref-name validation: branch names produced elsewhere are validated here with
-   `git check-ref-format --branch` rules (reject control chars, `..`, leading `-`, etc.)
-   → `GitError` (defense in depth against config-driven ref injection).
+5. Ref-name validation: a **pure TypeScript** validator `isValidBranchName(name)`
+   (no process spawn — required so rejection-before-spawn is testable) mirroring the
+   `git check-ref-format --branch` subset relevant here; reject when the name: is
+   empty or > 200 chars; starts with `-` or `.` or ends with `.` or `/` or `.lock`;
+   contains any of space, `~`, `^`, `:`, `?`, `*`, `[`, `\`, `..`, `//`, `@{`, or a
+   control char (< 0x20, 0x7F). Any rejection → `GitError` before spawning git
+   (defense in depth against config/flag-driven ref injection).
 6. `stagePaths`: resolves each path, asserts inside root (reuse Issue 02 confinement
    helper) AND membership in `allowedPaths` (exact resolved-path match), passes after
    `--` separator. Empty list → `GitError` (programmer error); a path in the repo but
    outside `allowedPaths` (e.g. `src/index.ts`) → `GitError` (dedicated test).
-7. Identity: commits use `-c user.name=i18n-agent -c user.email=…` so runs don't depend
-   on runner git config; committer untouched.
+7. Identity: commits use `-c user.name=i18n-agent -c user.email=…`, which sets **both
+   author and committer** to the agent identity (intended: runs must not depend on or
+   impersonate runner git config); the test asserts author AND committer via
+   `git log -1 --format=%an/%ae/%cn/%ce`.
 8. Integration tests (real `git` binary in temp dirs — init repo, add origin as local
    bare repo): every API happy path; dirty-tree detection with/without untracked; force
    guard — pushing `i18n-agent/main` with lease succeeds, pushing `main` with
@@ -99,8 +105,9 @@ controls (DESIGN §12.1, §16 T-CMD/T-FORCE; ADR-004).
 
 ## Non-goals
 
-GitHub API, worktree management, merge/rebase conflict handling (branch strategy
-regenerates instead — ADR-004), submodules, signing.
+GitHub API, strategy-level worktree orchestration (Issue 28 composes `addWorktree`/
+`removeWorktree`; the primitives themselves ARE in scope here), merge/rebase conflict
+handling (branch strategy regenerates instead — ADR-004), submodules, signing.
 
 ## Design References
 

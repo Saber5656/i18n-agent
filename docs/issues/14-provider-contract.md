@@ -28,7 +28,8 @@ right first makes the provider issues mechanical.
    export interface GlossaryTerm { source: string;
      translations: Record<string, string>; note?: string }
    export interface ProviderInit { name: ProviderName; model: string;
-     baseUrl?: string; requestTimeoutMs: number; apiKey?: string }
+     baseUrl?: string; allowInsecureBaseUrl: boolean; requestTimeoutMs: number;
+     apiKey?: string; fakeCounterPath?: string }
    ```
    `GlossaryTerm` lives HERE (loader comes in Issue 21) so Issue 15 can proceed in
    parallel.
@@ -36,16 +37,22 @@ right first makes the provider issues mechanical.
    the **single place** env is read (DESIGN §10.2): default `apiKeyEnv` per the §10.2
    table; ollama/fake require none; missing required env → `EnvError` naming the exact
    variable; on success it calls `registerSecretValue(key, apiKeyEnv)` (Issue 03) before
-   returning. The resolved key is carried only inside `ProviderInit.apiKey`; providers
-   store it in a private field (`#apiKey`) and never read `process.env` — enforced by a
-   test asserting `JSON.stringify(provider)` contains no key material plus a source-text
-   test asserting `process.env` does not appear in any concrete provider module.
+   returning. It also copies `allowInsecureBaseUrl` from config into `ProviderInit`,
+   sets Ollama's default `baseUrl` `http://localhost:11434` when config leaves it
+   unset, and — for the `fake` provider only — resolves env
+   `I18N_AGENT_FAKE_COUNTER` into `ProviderInit.fakeCounterPath` (so the env-read ban
+   on provider modules stays absolute). The resolved key is carried only inside
+   `ProviderInit.apiKey`; providers store it in a private field (`#apiKey`) and never
+   read `process.env` — enforced by a test asserting `JSON.stringify(provider)`
+   contains no key material plus a source-text test asserting `process.env` does not
+   appear in any provider module (fake included).
 3. `registry.ts`: static map `ProviderName → (init: ProviderInit) => TranslationProvider`
    (direct imports, ADR-005). `createProvider(cfg)` composes:
    `resolveCredentials(cfg)` → `assertSafeBaseUrl(init)` → constructor.
-   `assertSafeBaseUrl` (exported, DESIGN §10.2/§16 T-NET defense-in-depth): `baseUrl`
-   absent OR protocol `https:` OR hostname ∈ {`localhost`, `127.0.0.1`, `::1`} OR
-   `allowInsecureBaseUrl === true`; otherwise `ConfigError`. Real providers register
+   `assertSafeBaseUrl(init: ProviderInit)` (exported, DESIGN §10.2/§16 T-NET
+   defense-in-depth): `init.baseUrl` absent OR protocol `https:` OR hostname ∈
+   {`localhost`, `127.0.0.1`, `::1`} OR `init.allowInsecureBaseUrl === true`;
+   otherwise `ConfigError`. Real providers register
    stubs throwing `ProviderError("not implemented")` (imported from `util/errors.ts`;
    test asserts the class and exit-code mapping 5) until their issues land.
 4. `fake.ts`: deterministic, offline. For each item returns
@@ -56,10 +63,10 @@ right first makes the provider issues mechanical.
    Issue 16); `[[FAKE:SLOW:<ms>]]` → delayed resolution where `<ms>` must match
    `^[0-9]{1,4}$` and is clamped to ≤ 5000 — a malformed marker is treated as literal
    text (no delay). Usage numbers: `inputTokens = Σ source chars`, `outputTokens =
-   Σ output chars` (deterministic). E2E call-counter hook: when env
-   `I18N_AGENT_FAKE_COUNTER` is set to a file path, each `translateBatch` call appends
-   one line to that file (enables cross-process zero-provider-call assertions in
-   Issue 32).
+   Σ output chars` (deterministic). E2E call-counter hook: when
+   `init.fakeCounterPath` is set (populated from env `I18N_AGENT_FAKE_COUNTER` by
+   `resolveCredentials`, req. 2), each `translateBatch` call appends one line to that
+   file (enables cross-process zero-provider-call assertions in Issue 32).
 5. Timeout plumbing: providers receive `AbortSignal`; contract states they must abort
    promptly and surface `ProviderError` on abort (fake implements it; tested with fake
    timers).
@@ -75,8 +82,9 @@ right first makes the provider issues mechanical.
 
 - [ ] Types compile verbatim per DESIGN §10.1; `GlossaryTerm` exported from providers
       package.
-- [ ] `resolveCredentials` implements the §10.2 table exactly (test per provider) and
-      registers the key with the redactor (spy test).
+- [ ] `resolveCredentials` implements the §10.2 table exactly (test per provider),
+      registers the key with the redactor (spy test), sets Ollama's default `baseUrl`
+      when absent, and populates `fakeCounterPath` for the fake provider only.
 - [ ] `assertSafeBaseUrl` enforces the exact T-NET host/protocol matrix.
 - [ ] Fake provider is deterministic, offline, supports the three magic behaviors plus
       the counter hook, and respects AbortSignal.

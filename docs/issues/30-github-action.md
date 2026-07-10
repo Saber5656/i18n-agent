@@ -37,7 +37,11 @@ T-SUPPLY).
      any non-empty value is passed to npx verbatim — a canary version spec like
      `i18n-agent@0.2.0-rc.1` or a local tarball path; DESIGN §14.1).
 2. Steps (composite, `shell: bash` each):
-   1. `actions/setup-node@<full-SHA>` with `node-version: 22` (comment carries the tag);
+   1. `actions/setup-node@<full-SHA>` with `node-version: 22` — pin rule: at
+      implementation time resolve the latest stable setup-node release tag to its full
+      commit SHA (e.g. `gh api repos/actions/setup-node/git/ref/tags/<tag>`), use the
+      SHA in `uses:`, put the tag in the adjacent comment, and paste the resolution
+      command + output into the implementation PR as evidence;
    2. input validation step: reject unknown `command`/`strategy` values with a clear
       error (defense against workflow typos silently running `pr`);
    3. run step — exact safe pattern (no `eval`, inputs never interpolated into shell

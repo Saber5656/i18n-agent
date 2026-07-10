@@ -32,9 +32,12 @@ guards are specified in DESIGN §12.2 and ADR-004; several are security-contract
    inside a git repo (else `GitError` exit 4); provider key pre-checked via Issue 14's
    resolver; for `branch` strategy: `GITHUB_TOKEN`/`GH_TOKEN` present (exit 4).
 3. `--strategy branch` implements DESIGN §12.2 steps 1–7 (temp-worktree model):
-   - base = `--base` ?? config `git.baseBranch` ?? `defaultBranch()`; the base ref is
-     validated (Issue 26 ref rules) BEFORE any git command runs — option-like values
-     (`--upload-pack=…`) rejected with `GitError`;
+   - base = `--base` ?? config `git.baseBranch` ?? `defaultBranch()`. Validation
+     ordering: an explicit `--base`/config value is validated (Issue 26
+     `isValidBranchName`) before ANY git command runs; when falling back to
+     `defaultBranch()` (itself a read-only git query), the discovered name is validated
+     before it is used in `fetch` or anywhere else — option-like values
+     (`--upload-pack=…`) rejected with `GitError` in both paths;
    - `fetch origin <base>`; work branch `<branchPrefix><base>`;
    - `addWorktree(tmpdir, origin/<base>)` (Issue 26) — the user's checkout is never
      touched, so NO clean-worktree precondition; run the pipeline with root = tmpdir;
@@ -58,10 +61,11 @@ guards are specified in DESIGN §12.2 and ADR-004; several are security-contract
    - stage config-managed changed paths only, commit, `push origin HEAD` (NO force);
    - never calls the PR API.
 5. Report: `command: "pr"`; single-PR runs populate `RunReport.pr`; `splitPerLocale`
-   runs populate `RunReport.prs[]` (one `PrRef` per locale, `pr` omitted — DESIGN
-   §15.2). Exit-code aggregation across locales: highest-severity result wins
-   (10 > 5 > 4 > 3 > 2 > 0); per-locale outcomes (incl. failures) appear in `prs[]` /
-   `failures` so JSON consumers see both.
+   runs populate `RunReport.prs[]` with one `PrRef` per **successfully created or
+   updated PR** (`pr` omitted — DESIGN §15.2); a locale that produced no PR (pipeline
+   or git/API failure) appears instead in `failures[]` as
+   `{ id: "<locale>", reason: … }`. Exit-code aggregation across locales:
+   highest-severity result wins (10 > 5 > 4 > 3 > 2 > 0).
 6. Integration tests (local bare origin + nock): branch happy path (assert: bare repo
    has work branch, PR create payload correct, user checkout byte-untouched, no stale
    worktree); branch strategy with a DIRTY user tree still succeeds (worktree model);
