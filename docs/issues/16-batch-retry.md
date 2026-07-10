@@ -44,17 +44,18 @@ correctness here bounds cost (T-LOOP adjacent) and reliability.
    and document the encoding; tests must cover a key containing `:`).
 4. Concurrency: `p-limit(maxConcurrency)` across ALL batches (not per locale).
    Each request wrapped in `AbortSignal.timeout(requestTimeoutMs)`.
-5. Retry policy per request (DESIGN §10.4): retry on network error, HTTP 5xx, 429
-   (provider errors must carry `retryable: boolean` — extend `ProviderError` with it,
-   coordinating with Issue 03's class): backoff `min(1000·2^attempt + jitter(0..250),
-   30000)` ms, at most `maxRetries` retries. Non-retryable (4xx auth/permission) →
-   `ProviderError` fails the whole run fast (exit 5 upstream).
-6. Content problems (from Issue 15's `parseProviderResponse`): `not-json`/prose → ONE
-   corrective re-request of the same batch with an appended system line "Previous reply
-   was not valid JSON; reply with only the JSON object." Missing ids after that → each
-   missing id retried once in a single-item batch; still missing → failure
-   `reason: "missing-translation"`. Extra ids/non-strings are dropped and logged (never
-   written).
+5. Retry policy per request (DESIGN §10.4): retry when `ProviderError.retryable === true`
+   (the field is defined on the class in Issue 03; providers set it — network/5xx/429
+   true, 4xx auth false): backoff `min(1000·2^attempt + jitter(0..250), 30000)` ms, at
+   most `maxRetries` retries. Non-retryable → `ProviderError` fails the whole run fast
+   (exit 5 upstream).
+6. Content problems (from Issue 15's `parseProviderResponse`): `problems` includes
+   `not-json` → ONE corrective re-request of the same batch built via
+   `buildPrompt(req, { correction: true })` (Issue 15 owns the corrective text; this
+   module never assembles prompt strings — T-INJ separation). `missing-id:*` after that
+   → each missing id retried once in a single-item batch; still missing → failure
+   `reason: "missing-translation"`. `extra-id:*`/`non-string:*` values are dropped and
+   logged (never written).
 7. Failure isolation: item failures never abort the run; aggregate into `failures` for
    exit code 2 upstream. If EVERY batch fails with retryable exhaustion →
    `ProviderError` (exit 5).
@@ -62,20 +63,30 @@ correctness here bounds cost (T-LOOP adjacent) and reliability.
    HTTP-level attempts (including retries).
 9. Determinism aid: batches are formed in input order; jitter comes from an injectable
    `rng: () => number` (default `Math.random`) so tests pass a seeded stub.
-10. Tests (fake timers + fake provider + a scripted mock provider): chunking by count and
-    by char budget; a key containing `:` and unicode; 429 → backoff schedule asserted
-    (timer values); auth 4xx → fast `ProviderError`; `[[FAKE:FAIL]]` → single-item retry
-    then failure recorded; `[[FAKE:EXTRA]]` → extra id dropped, logged; timeout → abort
-    surfaced as retryable; concurrency ceiling observed (max in-flight counter);
-    all-batches-fail → ProviderError.
+10. Tests (fake timers + Issue 14's fake provider — its `[[FAKE:FAIL]]`/`[[FAKE:EXTRA]]`
+    sentinel semantics are that issue's contract — plus a locally-defined scripted mock
+    provider for HTTP-status scenarios): chunking by count and by char budget; a key
+    containing `:` and unicode; 429 → backoff schedule asserted (timer values); auth
+    4xx → fast `ProviderError`; `[[FAKE:FAIL]]` → single-item retry then failure
+    recorded; `[[FAKE:EXTRA]]` → extra id dropped, logged; `not-json` scripted response
+    → corrective re-request uses `correction: true` (spy on buildPrompt args); timeout
+    → abort surfaced as retryable; concurrency ceiling observed (max in-flight
+    counter); all-batches-fail → ProviderError; usage accounting (see AC).
 
 ## Acceptance Criteria
 
 - [ ] Chunking respects both caps; boundary tests at exactly `batchSize` and 8 000 chars.
 - [ ] Backoff sequence matches the formula (asserted via fake timers, seeded jitter).
 - [ ] Auth failures abort fast; item content failures never abort the run.
+- [ ] Corrective re-request is triggered exactly once per `not-json` batch and uses
+      `buildPrompt(req, { correction: true })` (spy-asserted).
 - [ ] Ids are collision-safe for arbitrary flatKeys (encoding tested).
 - [ ] In-flight requests never exceed `maxConcurrency` (instrumented test).
+- [ ] `usage.requests` counts every HTTP attempt (initial + retries + corrective +
+      single-item retries); token sums treat absent provider usage as 0
+      (table-driven test).
+- [ ] Exports pure `planBatches(pending, cfg)` (chunking only, no IO) reused by
+      Issue 25's `--dry-run`.
 
 ## Validation
 
@@ -84,7 +95,8 @@ correctness here bounds cost (T-LOOP adjacent) and reliability.
 
 ## Dependencies
 
-14. (Uses Issue 12's `DiffItem` type; both are Wave ≤ 3 — import type only.)
+03 (`ProviderError.retryable`), 12 (`DiffItem` type, import type only), 14, 15
+(`parseProviderResponse`, `buildPrompt` correction flag).
 
 ## Non-goals
 

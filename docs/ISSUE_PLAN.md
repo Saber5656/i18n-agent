@@ -73,37 +73,37 @@ during implementation.
 | Issue | Depends on |
 |---|---|
 | 01 | — |
-| 02 | 01 |
+| 02 | 01, 03 (`ConfigError` class) |
 | 03 | 01 |
-| 04 | 01 |
+| 04 | 01, 03 (`FormatError` class) |
 | 05 | 03, 04 |
 | 06–10 | 05 |
 | 11 | 02, 03, 04 |
 | 12 | 04, 11 |
-| 13 | 02, 03, 05, 06 (first adapter), 12 |
+| 13 | 02, 03, 05, 06 (json fixtures only), 12 |
 | 14 | 02, 03 |
-| 15 | 14, 21 (GlossaryTerm type lives in 14; 21 supplies loader — see issue files) |
-| 16 | 14 |
+| 15 | 14 (GlossaryTerm type is defined in 14; loader lands later in 21) |
+| 16 | 03, 12 (DiffItem type), 14, 15 (response parser) |
 | 17–20 | 14, 15, 16 |
 | 21 | 02, 14 |
-| 22 | 04, 05 (profile ids) |
+| 22 | 04, 05 (profile ids), 14 (GlossaryTerm type) |
 | 23 | 21, 22 |
-| 24 | 02, 13 (report shapes), 22, 23 |
-| 25 | 12, 13, 16, 21, 24, 06–10 (all adapters for full matrix; runnable with 06 alone) |
+| 24 | 02, 13 (report shapes), 21 (glossary loader), 22, 23 |
+| 25 | 12, 13, 14 (provider registry), 16, 21, 24, 06–10 (all adapters for full matrix; runnable with 06 alone) |
 | 26 | 02, 03 |
-| 27 | 02, 03 |
+| 27 | 02, 03, 13 (`RunReport` type for PR body) |
 | 28 | 25, 26, 27 |
 | 29 | 02, 03 |
 | 30 | 28 (published CLI behavior), 01 |
 | 31 | 30 |
-| 32 | 25, 28 (uses fake provider, bare-repo origin, nock GitHub) |
+| 32 | 25, 28 (uses fake provider incl. its call-counter hook from 14, bare-repo origin, nock GitHub) |
 | 33 | 28, 29, 30, 31 |
 | 34 | 01, 30 |
 | 35 | 01 |
-| 36 | 02, 03, 07, 10, 15, 25, 26, 31 (audits their controls) |
+| 36 | 02, 03, 07, 10, 15, 25, 26, 31, 32, 33, 34, 35 (audits their controls; runs last) |
 
 Parallelism notes: within Wave 1, issues 06–10 are mutually independent; within Wave 3,
-17–20 are mutually independent and 21 can run parallel to 16; 26/27/29 are mutually
+17–20 are mutually independent and 21 can run parallel to 15/16; 26/27/29 are mutually
 independent in Wave 6.
 
 ## 4. Implementation Waves

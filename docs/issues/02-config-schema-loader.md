@@ -30,25 +30,37 @@ edit it), so validation and path confinement are security controls, not convenie
    branchPrefix regex `^[A-Za-z0-9._/-]{1,64}/$`; numeric ranges for concurrency/timeout/
    retries/batchSize/maxKeysPerRun as in §6.2). Use `.strict()` on every object (unknown
    keys rejected). Export inferred type `Config`.
+   `files[].options` is a **per-format discriminated union** keyed by `format`:
+   `json → { keyStyle?: "nested" | "flat" }` (default `nested`);
+   `yaml → { rootLocaleKey?: boolean }` (default `true`);
+   `arb | ios-strings | android-xml → {}` (empty object only). Unknown option keys are
+   rejected with the offending path.
+   `localeMap`: keys must be configured locale tokens; values match
+   `^[A-Za-z0-9_-]{1,16}$` (path-segment-safe; no `/`, `.`, or whitespace).
 2. `baseUrl` rule (T-NET): if set, must parse as URL with protocol `https:`, OR host in
    `{localhost, 127.0.0.1, [::1]}`, OR `allowInsecureBaseUrl === true`; otherwise
    `ConfigError`.
 3. `load.ts`: `loadConfig(opts: { cwd: string; configPath?: string }): Promise<LoadedConfig>`.
    Steps: resolve path (`configPath` ?? `<cwd>/i18n-agent.config.json`); stat + reject
-   files > 256 KiB; read UTF-8; `JSON.parse` (syntax error → `ConfigError` with position);
-   zod parse (issues → `ConfigError` listing `path.to.field: message` lines, all issues,
-   not just the first).
+   files > 256 KiB; read UTF-8; `JSON.parse` (syntax error → `ConfigError` with line/
+   column); zod parse → `ConfigError` listing **all** issues, one per line, in JSON
+   Pointer form: `/files/0/path: must contain "{locale}" exactly once`.
 4. `paths.ts`: `resolveInsideRoot(root: string, p: string): string` — resolves, then
    compares `fs.realpathSync` of the deepest existing ancestor against `realpath(root)`;
    any escape (absolute outside, `..`, symlink out) → `ConfigError` mentioning the
-   offending config field. Applied to `path` (template with `{locale}` replaced by a
-   probe token first), `sourcePath`, `styleGuidePath`, `glossaryPath`, `lockfilePath`.
+   offending config field. Applied to `sourcePath`, `styleGuidePath`, `glossaryPath`,
+   `lockfilePath`, and to `path` **expanded per locale**: substitute `{locale}` with
+   `sourceLocale` and with every entry of `targetLocales` (after `localeMap` mapping)
+   and confine each resulting concrete path — this closes traversal via `localeMap`
+   values as well (T-PATH).
 5. `LoadedConfig` = `{ config: Config; root: string; configPath: string }`. No API-key
    resolution here (ADR-003 — providers do that).
 6. `gen:schema` script: converts the zod schema to JSON Schema (draft 2020-12) via code
    (add the conversion dev-dependency of the implementer's choice from zod's official
-   tooling), writes `schemas/config.schema.json` deterministically (sorted keys), and the
-   build fails if the file is out of date (`gen:schema --check` in CI).
+   tooling), writes `schemas/config.schema.json` deterministically (sorted keys), and
+   supports `--check` (exit 1 on drift, no write). **This issue also edits
+   `.github/workflows/ci.yml`** to add a `gen:schema --check` step to the lint job
+   (in-scope file change).
 7. Unit tests (`tests/unit/config/*.test.ts`): happy path minimal + maximal configs;
    every constraint above has a rejecting test; traversal cases `../x`, absolute `/etc`,
    symlink escape (create real temp symlink); baseUrl http-non-localhost rejected,
@@ -57,12 +69,15 @@ edit it), so validation and path confinement are security controls, not convenie
 
 ## Acceptance Criteria
 
-- [ ] Schema behavior matches DESIGN §6.2 field-for-field (reviewer diffs table vs code).
-- [ ] All five path fields are confined to the repo root incl. symlink escapes.
-- [ ] `schemas/config.schema.json` is generated, committed, and drift-checked in CI.
-- [ ] `ConfigError` output lists every violation with its config path; exit-code mapping 3
-      verified once Issue 03 lands (integration test may live there).
-- [ ] 100 % of constraints in this issue have a dedicated unit test.
+- [ ] `tests/unit/config/schema.test.ts` contains a constraint matrix: one accepting and
+      one rejecting case per DESIGN §6.2 constraint named in requirement 1 (table-driven;
+      the test names enumerate the constraints).
+- [ ] All five path fields are confined to the repo root incl. symlink escapes and
+      per-locale template expansion (incl. a malicious `localeMap` value case).
+- [ ] `schemas/config.schema.json` is generated, committed, snapshot-tested, and
+      drift-checked in CI via `gen:schema --check`.
+- [ ] `ConfigError` output lists every violation in JSON Pointer form (multi-error
+      fixture asserted); `ConfigError.code === 3` asserted (class from Issue 03).
 
 ## Validation
 
@@ -73,7 +88,7 @@ edit it), so validation and path confinement are security controls, not convenie
 
 ## Dependencies
 
-01
+01, 03 (`ConfigError` base class and exit-code table)
 
 ## Non-goals
 

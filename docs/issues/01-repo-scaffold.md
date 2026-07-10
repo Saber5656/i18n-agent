@@ -25,7 +25,8 @@ is implemented here beyond an executable placeholder CLI entry.
 
 1. `package.json`: `"name": "i18n-agent"`, `"version": "0.0.0"`, `"type": "module"`,
    `"license": "MIT"`, `"engines": { "node": ">=20" }`, `"bin": { "i18n-agent": "dist/cli.js" }`,
-   `"files": ["dist", "schemas", "action.yml", "README.md", "LICENSE"]`,
+   `"files": ["dist", "schemas", "README.md", "LICENSE"]` (Issue 30 appends `action.yml`
+   when it exists),
    scripts: `build` (tsup), `test` (vitest run), `test:watch`, `lint` (biome check .),
    `format` (biome format --write .), `typecheck` (tsc --noEmit), `gen:schema`
    (placeholder that exits 0 until Issue 02 implements it).
@@ -41,12 +42,16 @@ is implemented here beyond an executable placeholder CLI entry.
 6. Directory skeleton per DESIGN §5 (empty `.gitkeep` files where needed):
    `src/{cli/commands,config,core,formats,providers,validate,glossary,git,report,util}`,
    `tests/{unit,integration,e2e,fixtures}`, `examples/workflows`, `schemas/`.
-7. `.github/workflows/ci.yml`: triggers `push` (default branch) + `pull_request`;
-   jobs: lint → typecheck → test → build; matrix node `20`, `22`;
+7. `.github/workflows/ci.yml`: triggers `push: branches: [main]` + `pull_request`;
+   jobs: lint → typecheck → test → build, plus an `actionlint` job linting
+   `.github/workflows/*.yml` (DESIGN §17 static row; pinned actionlint action or
+   pinned binary download); matrix node `20`, `22`;
    **all `uses:` actions pinned by full commit SHA** with a version comment (DESIGN §16
    T-SUPPLY); `permissions: contents: read` at workflow level.
 8. `.gitignore`: node_modules, dist, coverage, `.env*`, OS junk. Commit `package-lock.json`.
-9. LICENSE: MIT, copyright holder `Saber5656` (flagged in PR for owner confirmation).
+9. LICENSE: MIT, copyright line exactly `Copyright (c) 2026 Saber5656` (accepted value;
+   the implementation PR description must contain the line "LICENSE holder: Saber5656 —
+   confirm or amend" so the owner can override).
 10. One smoke test `tests/unit/smoke.test.ts` asserting `1 + 1 === 2` so the vitest wiring
     is proven.
 
@@ -55,17 +60,19 @@ is implemented here beyond an executable placeholder CLI entry.
 - [ ] `npm ci && npm run lint && npm run typecheck && npm run test && npm run build` all
       succeed locally on Node 20.
 - [ ] `node dist/cli.js` prints the placeholder line, exit 0.
-- [ ] CI workflow runs the same five steps on push/PR, matrix node 20+22, actions pinned
-      by SHA, workflow-level `permissions: contents: read`.
+- [ ] CI workflow runs the same five steps plus actionlint on push(main)/PR, matrix node
+      20+22, actions pinned by SHA, workflow-level `permissions: contents: read`.
 - [ ] No runtime dependencies present in `package.json`.
-- [ ] Directory skeleton matches DESIGN §5 exactly (names verified).
+- [ ] Directory skeleton contains exactly: `src/cli/commands`, `src/config`, `src/core`,
+      `src/formats`, `src/providers`, `src/validate`, `src/glossary`, `src/git`,
+      `src/report`, `src/util`, `tests/{unit,integration,e2e,fixtures}`,
+      `examples/workflows`, `schemas/` (checklist in PR).
 
 ## Validation
 
 - Run the command chain in Acceptance Criteria on a clean checkout.
 - Open a draft PR and confirm CI is green on both Node versions.
-- `npm pack --dry-run` lists only `dist`, `schemas`, `action.yml` placeholder-safe files,
-  README, LICENSE.
+- `npm pack --dry-run` lists only `dist/`, `schemas/`, `package.json`, README, LICENSE.
 
 ## Dependencies
 

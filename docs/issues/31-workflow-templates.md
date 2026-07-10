@@ -24,8 +24,11 @@ loop safety) as copy-pasteable YAML (DESIGN §14.2, §16 T-FORK/T-LOOP/T-PRIV).
 ## Detailed Requirements
 
 1. `sync-pr.yml` (W1), exact spec:
-   - `on: push: branches: [main]` with `paths:` covering `i18n-agent.config.json`,
-     `i18n-agent.lock.json`, and a commented example source-locale glob users must edit;
+   - `on: push: branches: [main]` with adjacent comment `# ← replace "main" with your
+     default branch if it differs`; `paths:` actively lists `i18n-agent.config.json`,
+     `i18n-agent.lock.json`, and the **uncommented** example glob `locales/en.json`
+     with comment `# ← edit to match your source-locale file(s)` (an inactive filter
+     that never triggers is worse than an example users must adjust);
    - top-level `permissions: contents: write, pull-requests: write` and nothing else;
    - `concurrency: { group: i18n-agent-sync, cancel-in-progress: false }` (queued, not
      cancelled — cancelling mid-push risks orphan branches; comment explains);
@@ -41,7 +44,15 @@ loop safety) as copy-pasteable YAML (DESIGN §14.2, §16 T-FORK/T-LOOP/T-PRIV).
    - `permissions: contents: write` only (no PR API used by commit strategy);
    - `concurrency: { group: i18n-agent-${{ github.ref }}, cancel-in-progress: true }`;
    - checkout with `ref: ${{ github.event.pull_request.head.ref }}` (pinned SHA);
-   - action with `command: pr`, `strategy: commit`.
+   - action with `command: pr`, `strategy: commit`; the same provider `env:` block as
+     W1 (`OPENAI_API_KEY` from secrets + commented alternates — the commit strategy
+     still translates and needs the key).
+   Action-reference pinning policy (T-SUPPLY exception, stated in a comment in both
+   templates): `Saber5656/i18n-agent@v1` is a mutable major tag **by design** for user
+   templates — the executed CLI is contained by the SHA-pinned action's baked
+   `EXACT_VERSION`; users wanting the strictest posture may pin the action by full SHA
+   (comment shows how). Third-party actions (checkout, setup-node) ARE SHA-pinned in
+   the templates.
 3. Both templates: header comment box — what the workflow does, required secrets, the
    sentence "Never change `on:` to `pull_request_target`; doing so exposes secrets to
    untrusted code" (T-FORK), and a link placeholder to docs (Issue 33 fills URL).
@@ -56,18 +67,23 @@ loop safety) as copy-pasteable YAML (DESIGN §14.2, §16 T-FORK/T-LOOP/T-PRIV).
 
 ## Acceptance Criteria
 
-- [ ] Both templates match the exact triggers/permissions/concurrency/guards above
-      (reviewed line-by-line against DESIGN §14.2).
-- [ ] actionlint zero findings in CI.
-- [ ] Every guard has an adjacent WHY comment (fork condition, prefix guard,
-      permissions, concurrency, paths filter).
+- [ ] Mechanical policy test (`tests/security/workflow-templates.test.ts`) asserts on
+      both template files: required trigger/permissions/concurrency keys present with
+      the exact values above; the W2 `if:` guard string present verbatim;
+      `pull_request_target` absent from the entire repo (`git grep`); no YAML anchors;
+      third-party `uses:` are 40-char SHA-pinned; required comment phrases present
+      (`replace "main"`, `edit to match your source-locale`, fork-secret note,
+      pin-by-SHA note).
+- [ ] actionlint zero findings in CI for both templates.
 - [ ] The anti-pattern doc exists and is referenced by both templates.
 
 ## Validation
 
-- CI actionlint job green.
-- Manual dry review: copy `sync-pr.yml` into a scratch repo with the fake provider and
-  confirm it runs to a no-op cleanly (recorded as part of Issue 34's QA checklist).
+- `npx actionlint examples/workflows/sync-pr.yml examples/workflows/pr-append.yml`
+  clean locally and in CI; `npx vitest run tests/security/workflow-templates.test.ts`
+  green.
+- Live no-op run of `sync-pr.yml` in a scratch repo is recorded in Issue 34's QA
+  checklist (not a completion gate here).
 
 ## Dependencies
 

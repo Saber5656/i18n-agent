@@ -33,36 +33,46 @@ SECURITY.md mandate). Kept separate from code so it can land any time after scaf
    branches), adapter/provider contribution pointers to DESIGN §8/§10 + conformance
    harness, DCO-style sign-off NOT required (keep friction low; MIT + inbound=outbound
    noted).
-3. `CODE_OF_CONDUCT.md`: Contributor Covenant v2.1 verbatim with contact = GitHub
-   issues/advisories.
+3. `CODE_OF_CONDUCT.md`: Contributor Covenant v2.1 verbatim; enforcement contact
+   split: conduct reports → GitHub Issues (public) or the maintainer contact
+   placeholder `@Saber5656`; security vulnerabilities → GitHub Security Advisories
+   only (never public issues).
 4. Issue forms (YAML): bug report (version, command, config with secrets-redaction
-   warning, expected/actual, logs) and feature request (problem, proposal, alternatives);
-   `config.yml` disables blank issues, links Discussions-less repo to templates.
+   warning, expected/actual, logs) and feature request (problem, proposal,
+   alternatives); `config.yml` exact contents: `blank_issues_enabled: false` and one
+   `contact_links` entry pointing to SECURITY.md for vulnerability reports.
 5. PR template: summary, linked issue (`Closes #NN`), checklist (tests added, changeset
    added or `no-changeset` justified, docs touched if user-facing).
-6. `dependabot.yml`: weekly `npm` + `github-actions` ecosystems, grouped minor/patch,
-   security updates daily.
+6. `dependabot.yml`: weekly **version updates** for `npm` + `github-actions`
+   ecosystems, grouped minor/patch. (Dependabot *security* updates are a repository
+   setting, not a schedule in this file — documented in REPO_SETTINGS.md instead.)
 7. `docs/REPO_SETTINGS.md`: documented owner-applied settings — default-branch ruleset
    (PR required, no force push, no direct push), secret scanning + push protection ON,
-   Actions permissions read-only default, tag protection for `v*`. Each with the GitHub
-   UI path. (Agent documents; owner applies — key/settings handling stays manual per
-   owner policy.)
+   **Dependabot alerts ON and Dependabot security updates ON** (Settings → Code
+   security and analysis), Actions permissions read-only default, tag protection for
+   `v*`. Each with the GitHub UI path. (Agent documents; owner applies — key/settings
+   handling stays manual per owner policy.)
 
 ## Acceptance Criteria
 
-- [ ] All files present, lint-clean (markdownlint via CI if configured in Issue 01, else
-      prose review), links resolve.
-- [ ] Issue forms render correctly (GitHub YAML form schema — validated by actionlint-
-      adjacent schema check or manual render on a branch).
+- [ ] All files present in expected locations (`git ls-files` list in PR); internal
+      links resolve via the Issue 33 link checker (or a local equivalent if 33 is not
+      yet merged).
+- [ ] YAML validity of issue forms + dependabot.yml proven by a small parse script
+      (`scripts/validate-github-yaml.mjs` using the already-allowlisted `yaml`
+      package) run in CI; rendered-form screenshots from a pushed branch attached to
+      the PR as evidence.
 - [ ] SECURITY.md names the Advisories flow and scopes it to DESIGN §16 threat classes.
-- [ ] Dependabot config covers both ecosystems with grouping.
-- [ ] REPO_SETTINGS.md lists every setting with its UI path; no step requires agent
-      access to secrets.
+- [ ] Dependabot config: weekly version updates, both ecosystems, grouped minor/patch;
+      no security-update schedule inside the file.
+- [ ] REPO_SETTINGS.md lists every setting incl. Dependabot alerts/security updates
+      with UI paths; no step requires agent access to secrets.
+- [ ] CoC contact split (conduct vs vulnerability) present.
 
 ## Validation
 
-- Push branch → verify issue forms/PR template render on GitHub UI (screenshot in PR).
-- `git ls-files` shows all files in expected locations.
+- `node scripts/validate-github-yaml.mjs` green in CI; screenshots of both issue forms
+  and the PR template rendering attached to the implementation PR.
 
 ## Dependencies
 

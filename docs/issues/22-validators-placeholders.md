@@ -23,7 +23,15 @@ on untrusted text, so linear-time behavior is a security requirement (T-REDOS).
 
 ## Detailed Requirements
 
-1. `types.ts`: `Validator` and `ValidationIssue` interfaces verbatim from DESIGN §11.1.
+1. `types.ts`: `Validator` and `ValidationIssue` interfaces verbatim from DESIGN §11.1 —
+   note the check input carries `fileId`/`key`/`locale` context (validators stamp them
+   into issues; the runner does not post-process) and the adapter-neutral
+   `placeholderHints?: string[]` field (populated by the runner from
+   `entry.meta.placeholderNames`, e.g. ARB metadata — no ARB-specific naming leaks into
+   validator types). The `GlossaryTerm` type is imported from Issue 14's provider types.
+   Scope rule: the `placeholders` validator processes only the five token profiles and
+   **ignores the `tags` profile entirely** — markup parity is Issue 23's `tags`
+   validator.
 2. Extractors — each a hand-written single-pass scanner (NO backtracking regex; simple
    bounded regexes for token shapes are acceptable if linear), input capped at 10 000
    chars (longer → issue `severity: "error", message: "value exceeds validation cap"`):
@@ -37,11 +45,14 @@ on untrusted text, so linear-time behavior is a security requirement (T-REDOS).
    - `printf-java`: `%s %d %f %b %n`-style incl. positional `%1$s` and flags/width
      (`%,d`, `%05d`) — normalize like printf-ios; `%%` ignored.
 3. `placeholders` validator: for the entry's configured profiles (from file entry
-   override or adapter defaults, resolved by caller), extract token multisets from
-   source and translation; inequality → error issue listing missing/extra tokens
-   (sorted, deduped in message). ARB placeholder hints (`meta.placeholderNames`, Issue
-   08) add expected `icu` names even if absent from source text (covers optional
-   placeholders).
+   override or adapter defaults, resolved by caller; `tags` filtered out per req. 1),
+   extract token multisets from source and translation; inequality → error issue
+   listing missing/extra tokens (sorted, deduped in message). `placeholderHints` add
+   expected `icu` names even if absent from source text (covers optional placeholders).
+   Unbalanced-brace semantics: if the SOURCE extraction hits `#unbalanced#`, parity is
+   skipped for that entry and a warn-severity issue `source-unparseable` is emitted;
+   if only the TRANSLATION is unbalanced, parity fails as an error (and `icuSyntax`
+   fires independently).
 4. `icuSyntax` validator (translated text only): `{}` balance, argument-name charset
    `[a-zA-Z0-9_]`, known complex keywords (`plural`, `select`, `selectordinal`), plural
    branch braces balanced. Runs only when profiles include `icu`.
@@ -56,20 +67,27 @@ on untrusted text, so linear-time behavior is a security requirement (T-REDOS).
 
 ## Acceptance Criteria
 
-- [ ] All five profiles + icuSyntax implemented as single-pass scanners with the exact
-      token grammars above, each with a documented grammar comment.
-- [ ] Full parity matrix tests pass; messages name missing/extra tokens.
-- [ ] Adversarial inputs complete within the time budget (CI-asserted).
-- [ ] ARB placeholder hints extend expected sets (test with Issue 08 fixture shape).
-- [ ] No `RegExp` constructed from input text anywhere in the module.
+- [ ] All five profiles + icuSyntax implemented with the exact token grammars above,
+      each with a documented grammar comment. Mechanical linearity checks: no regex
+      with nested quantifiers (source review note), no `new RegExp(` in the module
+      (`grep` test), and the adversarial timing budget below.
+- [ ] Full parity matrix tests pass; messages name missing/extra tokens; unbalanced
+      source/translation semantics per requirement 3.
+- [ ] Adversarial inputs complete in < 100 ms each (asserted with `performance.now`,
+      no fake timers).
+- [ ] `placeholderHints` extend expected sets (test uses `meta.placeholderNames`-shaped
+      input).
+- [ ] Issues carry `fileId`/`key`/`locale` from the check input.
 
 ## Validation
 
 - `npx vitest run tests/unit/validate/placeholders.test.ts` green; timing assertions on.
+- `grep -R "new RegExp" src/validate` returns nothing.
 
 ## Dependencies
 
-04, 05 (PlaceholderProfileId union)
+04, 05 (PlaceholderProfileId union), 14 (`GlossaryTerm` type referenced by the
+Validator interface)
 
 ## Non-goals
 

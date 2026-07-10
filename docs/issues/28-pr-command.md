@@ -23,51 +23,69 @@ guards are specified in DESIGN §12.2 and ADR-004; several are security-contract
 ## Detailed Requirements
 
 1. Flags: all `translate` flags (Issue 25) plus `--strategy branch|commit` (default
-   `branch`), `--base <branch>` (branch strategy only).
-2. Common preconditions: inside a git repo (else `GitError` exit 4); `GITHUB_TOKEN`/
-   `GH_TOKEN` present for `branch` strategy (checked BEFORE any translation spend —
-   fail fast, exit 4); provider key presence likewise pre-checked via Issue 14's
-   resolver.
-3. `--strategy branch` implements DESIGN §12.2 steps 1–6 exactly:
-   - clean worktree required (untracked allowed); dirty → `GitError` exit 4;
-   - base = `--base` ?? config `git.baseBranch` ?? `defaultBranch()`; `fetch origin base`;
-   - work branch `<branchPrefix><base>` (slashes in base kept; ref validated by Issue 26);
-   - run pipeline against a checkout of base on the work branch (local `switch -C` from
-     `origin/<base>`); empty result → report "up to date", restore original checkout,
-     exit 0, **no push, no PR call**;
-   - stage exactly: changed target files + lockfile (paths from `PipelineResult`);
-     commit (Issue 26 format); push with `forceWithLease: true` (guard active);
-   - `ensurePr` (Issue 27) with title/body from config + report; labels from config.
-   - Always restore the user's original checkout (branch or SHA) — including on error
-     (try/finally; test asserts).
+   `branch`), `--base <branch>` (branch strategy only; with `--strategy commit` →
+   `UsageError` exit 3). Flag semantics on `pr`: `--dry-run` runs the pipeline dry-run
+   in place and performs ZERO git mutations and ZERO GitHub API calls (nock-strict
+   test); `--prune`, `--reset-lockfile`, `--locale`, `--file`, `--allow-large` pass
+   through to the pipeline unchanged.
+2. Common preconditions (all checked BEFORE any translation spend; provider spy):
+   inside a git repo (else `GitError` exit 4); provider key pre-checked via Issue 14's
+   resolver; for `branch` strategy: `GITHUB_TOKEN`/`GH_TOKEN` present (exit 4).
+3. `--strategy branch` implements DESIGN §12.2 steps 1–7 (temp-worktree model):
+   - base = `--base` ?? config `git.baseBranch` ?? `defaultBranch()`; the base ref is
+     validated (Issue 26 ref rules) BEFORE any git command runs — option-like values
+     (`--upload-pack=…`) rejected with `GitError`;
+   - `fetch origin <base>`; work branch `<branchPrefix><base>`;
+   - `addWorktree(tmpdir, origin/<base>)` (Issue 26) — the user's checkout is never
+     touched, so NO clean-worktree precondition; run the pipeline with root = tmpdir;
+   - empty pipeline result → remove worktree, report "up to date", exit 0, **no push,
+     no PR call** (nock strict);
+   - stage in the worktree exactly the changed target files + lockfile
+     (`stagePaths(paths, allowedPaths)` from `PipelineResult`); commit with the
+     rendered DESIGN §12.1 message; push with `forceWithLease: true` (prefix guard
+     active);
+   - `ensurePr` (Issue 27) with title/body from config + report; labels from config;
+   - try/finally: `removeWorktree` always runs (success and error paths; test asserts
+     no stale worktrees via `git worktree list`).
    - `splitPerLocale: true` → loop locales; branch `<prefix><base>-<locale>`; one PR
-     per locale; failures in one locale don't abort others (aggregate exit code 2).
+     per locale; one locale's failure doesn't abort others.
 4. `--strategy commit` implements DESIGN §12.2:
    - refuse detached HEAD; refuse current branch starting with `branchPrefix`
-     (self-recursion guard, T-LOOP) — both `GitError` exit 4 with explanatory message;
+     (self-recursion guard, T-LOOP); refuse when any config-managed path (resolved
+     target files or lockfile) has local modifications (porcelain check limited to
+     those paths) — all `GitError` exit 4 with explanatory messages;
    - run pipeline in place; empty → exit 0 silently (loop terminator);
-   - stage changed files + lockfile, commit, `push origin HEAD` (NO force of any kind);
+   - stage config-managed changed paths only, commit, `push origin HEAD` (NO force);
    - never calls the PR API.
-5. Report: `RunReport.pr` populated on branch strategy (url/number/created);
-   `command: "pr"`; JSON/console via shared renderers.
+5. Report: `command: "pr"`; single-PR runs populate `RunReport.pr`; `splitPerLocale`
+   runs populate `RunReport.prs[]` (one `PrRef` per locale, `pr` omitted — DESIGN
+   §15.2). Exit-code aggregation across locales: highest-severity result wins
+   (10 > 5 > 4 > 3 > 2 > 0); per-locale outcomes (incl. failures) appear in `prs[]` /
+   `failures` so JSON consumers see both.
 6. Integration tests (local bare origin + nock): branch happy path (assert: bare repo
-   has work branch, PR create payload correct, original checkout restored); second run
-   with no changes → no push/PR calls (nock strict); second run with new key → lease
-   force push + PR update (not create); dirty tree → exit 4 before provider spend
-   (provider spy); token missing → exit 4 before provider spend; commit strategy happy
-   path appends exactly one commit to current branch; recursion guard (checkout
-   `i18n-agent/main` → exit 4); detached HEAD → exit 4; splitPerLocale creates two
-   branches/PRs (nock).
+   has work branch, PR create payload correct, user checkout byte-untouched, no stale
+   worktree); branch strategy with a DIRTY user tree still succeeds (worktree model);
+   second run with no changes → no push/PR calls (nock strict); second run with new key
+   → lease force push + PR update (not create); malicious `--base` rejected before any
+   git spawn; token missing → exit 4 before provider spend (provider spy); `--dry-run`
+   → zero git mutations/API calls; commit strategy happy path appends exactly one
+   commit to current branch; commit strategy with locally-modified lockfile → exit 4;
+   recursion guard (checkout `i18n-agent/main` → exit 4); detached HEAD → exit 4;
+   splitPerLocale creates two branches/PRs with `prs[]` populated and aggregated exit
+   code per requirement 5 (one locale forced to fail).
 
 ## Acceptance Criteria
 
-- [ ] Both strategies match DESIGN §12.2 step-for-step, verified by the integration
-      suite above.
-- [ ] No provider spend when preconditions fail (spy-proven for token/dirty cases).
-- [ ] Empty-diff runs perform zero pushes and zero GitHub API calls.
-- [ ] Original checkout always restored (success and thrown-error paths).
-- [ ] Commit strategy can never force-push and never touches the PR API (nock strict
-      mode).
+- [ ] Branch strategy: base validated pre-git; worktree created from `origin/<base>`;
+      empty result → zero push/API; staged paths ⊆ allowlist; lease-force push only on
+      prefix branch; PR create-vs-update both covered; worktree always removed
+      (each item is a named integration test).
+- [ ] Commit strategy: detached-HEAD, recursion, and dirty-managed-path refusals; one
+      plain commit; plain push; zero PR API calls (nock strict).
+- [ ] No provider spend when preconditions fail (spy-proven for token/guard cases).
+- [ ] User checkout is never modified by branch strategy (dirty-tree run passes with
+      tree hash unchanged).
+- [ ] `prs[]`/exit-code aggregation for splitPerLocale per requirement 5.
 
 ## Validation
 

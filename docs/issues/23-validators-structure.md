@@ -15,14 +15,24 @@ T-INJ residual); `glossary` closes the loop on Issue 21's steering.
 
 ## Scope
 
-- In: `src/validate/{structure.ts,glossaryCheck.ts}`, unit tests.
-- Out: runner (Issue 24), placeholder profiles (Issue 22).
+- In: `src/validate/{structure.ts,glossaryCheck.ts,registry.ts}` (the registry file
+  exports `ALL_VALIDATORS`), unit tests.
+- Out: runner (Issue 24), placeholder profiles (Issue 22). Division of labor: Issue 22
+  defines profile ids/types and the token-profile validators; this issue implements the
+  `tags` validator in `structure.ts` (the DESIGN §11.2 table lists `tags` as a profile
+  id — its checking logic lives here by explicit assignment).
 
 ## Detailed Requirements
 
-1. `tags` validator (in `structure.ts`): single-pass scanner extracting markup tokens:
-   opening `<name …>`, closing `</name>`, self-closing `<name/>`, numeric react-i18next
-   forms `<0>`, `</0>`, `<0/>`. Name charset `[a-zA-Z][a-zA-Z0-9-]*` or `[0-9]+`.
+1. `tags` validator (in `structure.ts`): single-pass scanner extracting markup tokens.
+   Token grammar: `<` + name + (attribute run: any chars except `<`/`>`) + (`/>` |
+   `>`) for opening/self-closing (whitespace before `/>` allowed, so `<br />` is
+   self-closing `br`); `</` + name + `>` for closing; numeric react-i18next forms
+   `<0>`, `</0>`, `<0/>` (numeric names take no attributes). Name charset
+   `[a-zA-Z][a-zA-Z0-9-]*` or `[0-9]+`. Attribute text participates only in span
+   scanning, never in parity comparison (`<a href="x">` ≡ `<a href="y">` for parity).
+   A `>` inside a quoted attribute value ends the scan at the quote-aware boundary
+   (single/double quotes tracked — still single-pass).
    Parity = multiset equality over (kind, name) pairs between source and translation;
    additionally verify open/close balance *within the translation* (well-nesting NOT
    required — UI strings may interleave; balance = equal open/close counts per name).
@@ -38,9 +48,10 @@ T-INJ residual); `glossary` closes the loop on Issue 21's steering.
    `glossary term "<source>" expected rendering "<target>"`. Severity comes from config
    (`validation.glossary`, default warn) — this validator only reports; severity mapping
    is the runner's job (consistent with DESIGN §11.1).
-4. All three implement the `Validator` interface from Issue 22's `types.ts` and are
-   registered in a static array `ALL_VALIDATORS` (order: placeholders, tags, icuSyntax,
-   empty, glossary — deterministic report order).
+4. All three implement the `Validator` interface from Issue 22's `types.ts`.
+   `src/validate/registry.ts` exports `ALL_VALIDATORS` as a static array in the fixed
+   order: placeholders, tags, icuSyntax, empty, glossary (deterministic report order;
+   ADR-005 static-registry pattern).
 5. Tests: tags matrix (missing close, renamed tag, added tag, numeric tags, self-closing,
    interleaved-but-balanced passes, literal `<` in text, `a < b && b > c` math text no
    false positive); empty matrix (whitespace-only, both-empty passes); glossary matrix
@@ -49,16 +60,21 @@ T-INJ residual); `glossary` closes the loop on Issue 21's steering.
 
 ## Acceptance Criteria
 
-- [ ] Tag parity + balance semantics exactly as specified; math/comparison text produces
-      no false positives (fixture-proven).
+- [ ] Tag parity + balance semantics exactly as specified (incl. `<br />`, quoted-`>`
+      attributes, attribute-insensitive parity); math/comparison text produces no false
+      positives (fixture-proven).
 - [ ] Glossary issues carry term and expected rendering; no regex from term text.
-- [ ] `ALL_VALIDATORS` export with fixed order exists for Issue 24.
-- [ ] Time budget met on adversarial inputs.
+- [ ] `src/validate/registry.ts` exports `ALL_VALIDATORS` in the fixed order (test
+      asserts ids sequence).
+- [ ] 10 000-char `<` flood completes in < 100 ms (`performance.now` assertion, no fake
+      timers).
 
 ## Validation
 
-- `npx vitest run tests/unit/validate/structure.test.ts
-  tests/unit/validate/glossaryCheck.test.ts` green.
+- `npm run lint && npm run typecheck && npx vitest run
+  tests/unit/validate/structure.test.ts tests/unit/validate/glossaryCheck.test.ts`
+  green (the lint/typecheck gate applies to every issue per ISSUE_PLAN §6; restated
+  here verbatim).
 
 ## Dependencies
 

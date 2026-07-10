@@ -23,8 +23,11 @@ schema validation and caps are security-relevant (DESIGN §10.5, §16 T-INJ).
 ## Detailed Requirements
 
 1. Glossary file (path from `translation.glossaryPath`, already root-confined by
-   Issue 02): YAML parsed with the same hardened options as Issue 07 (alias cap, no
-   custom tags, `.strict()` zod schema):
+   Issue 02): YAML parsed with hardened options stated here (self-contained; DESIGN §16
+   T-YAML): `parseDocument(raw, { uniqueKeys: true, maxAliasCount: 100, schema:
+   "core" })` with a `LineCounter` for positions; parse errors/warnings and custom tags
+   → `ConfigError` with line/col; file ≤ 256 KiB checked before parse. The resulting
+   plain object is validated by a `.strict()` zod schema:
    ```yaml
    version: 1
    terms:
@@ -34,10 +37,16 @@ schema validation and caps are security-relevant (DESIGN §10.5, §16 T-INJ).
                                             # may serve locales not yet configured)
        note: "optional, ≤200 chars"
    ```
-   Caps: ≤ 500 terms; duplicate `source` (case-insensitive) → `ConfigError` naming both
-   entries; file ≤ 256 KiB.
-2. `loadGlossary(path): Promise<GlossaryTerm[]>` returning Issue 14's `GlossaryTerm`;
-   absent config path → `[]` (feature off).
+   Caps: ≤ 500 terms (`terms: []` is valid = feature configured but empty); translation
+   values non-empty trimmed strings ≤ 200 chars; unknown keys rejected at every level;
+   duplicate `source` (case-insensitive) → `ConfigError` naming both term indexes and,
+   when available from the LineCounter, both line numbers.
+2. Public API (paths arrive absolute + root-confined from Issue 02):
+   ```ts
+   loadGlossary(path: string | null): Promise<GlossaryTerm[]>      // null → []
+   loadStyleGuide(path: string | null): Promise<string | undefined> // null → undefined
+   ```
+   `GlossaryTerm` is Issue 14's type.
 3. Relevance filter `relevantTerms(terms, items, targetLocale): GlossaryTerm[]`
    (DESIGN §10.5): term included iff `translations[targetLocale]` exists AND
    `term.source` occurs in at least one item's `text`, matched case-insensitively with
@@ -56,19 +65,24 @@ schema validation and caps are security-relevant (DESIGN §10.5, §16 T-INJ).
 
 ## Acceptance Criteria
 
-- [ ] Glossary schema enforced with all caps; duplicates rejected with both line refs.
+- [ ] Glossary schema enforced with all caps and value constraints; duplicates rejected
+      naming both term indexes (line numbers when available).
 - [ ] Relevance filter matches the boundary/substring rules exactly (matrix-tested).
-- [ ] No user-controlled regex anywhere in this module (grep + review).
-- [ ] Absent glossary/style paths disable features without error.
+- [ ] Absent glossary/style paths disable features without error (`[]` / `undefined`).
 - [ ] Oversized style guide fails loudly with actionable message.
+- [ ] Bomb/tag security fixtures rejected fast (< 1 s) with `ConfigError`.
 
 ## Validation
 
 - `npx vitest run tests/unit/glossary` green.
+- `grep -R -E "new RegExp" src/glossary` returns nothing (matching uses lowercase +
+  indexOf + manual boundary checks only; static regex literals are also absent by
+  construction).
 
 ## Dependencies
 
-02, 14 (GlossaryTerm type). Parallel-safe with 15/16.
+02, 14 (GlossaryTerm type). Parallel-safe with 15/16 (Issue 15 needs only the type,
+which lives in 14).
 
 ## Non-goals
 
@@ -77,4 +91,5 @@ CSV/TBX formats, per-file glossaries, term extraction/suggestion, compliance che
 
 ## Design References
 
-- DESIGN §10.5, §16 T-INJ (data flow into prompts), §6.2 (config fields)
+- DESIGN §10.5, §16 T-INJ (data flow into prompts), T-YAML (hardened parse), T-PATH
+  (paths pre-confined by Issue 02), §6.2 (config fields)

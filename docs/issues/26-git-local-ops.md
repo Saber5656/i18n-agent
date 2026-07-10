@@ -16,9 +16,10 @@ controls (DESIGN §12.1, §16 T-CMD/T-FORCE; ADR-004).
 
 ## Scope
 
-- In: `src/git/local.ts`, `src/git/remote.ts` (origin URL → owner/repo parsing), unit +
-  integration tests against real temp repos.
-- Out: PR API (Issue 27), strategy orchestration (Issue 28).
+- In: `src/git/local.ts`, unit + integration tests against real temp repos.
+- Out: PR API and origin-URL parsing (`src/git/remote.ts` belongs to Issue 27),
+  strategy orchestration incl. the commit-strategy self-recursion refusal (Issue 28
+  composes it from `currentBranch()` — noted here so no one duplicates it).
 
 ## Detailed Requirements
 
@@ -34,13 +35,26 @@ controls (DESIGN §12.1, §16 T-CMD/T-FORCE; ADR-004).
    fetch(root, ref): Promise<void>
    createBranchFrom(root, branch, startPoint): Promise<void>     // git switch -C … (local only)
    checkout(root, ref): Promise<void>
-   stagePaths(root, paths: string[]): Promise<void>              // git add -- <paths>; rejects [] and paths outside root
-   commit(root, message): Promise<{ sha: string }>               // author "i18n-agent <i18n-agent@users.noreply.github.com>" via -c flags
+   addWorktree(root, dir, startPoint): Promise<void>             // git worktree add <dir> <startPoint>
+   removeWorktree(root, dir): Promise<void>                      // git worktree remove --force <dir>
+   stagePaths(root, paths: string[], allowedPaths: string[]): Promise<void>
+     // git add -- <paths>; rejects [], paths outside root, and any path ∉ allowedPaths
+     // (callers pass the config-derived target files + lockfile — DESIGN §12.1 rail)
+   commit(root, message): Promise<{ sha: string }>
+     // author "i18n-agent <i18n-agent@users.noreply.github.com>" via -c flags;
+     // `message` is the COMPLETE pre-rendered message (subject, blank line, body,
+     // trailer) — rendering happens in Issue 28; this module byte-passes it through
    push(root, branch, opts:{ forceWithLease: boolean; branchPrefix: string }): Promise<void>
    headCommitTouchesOnly(root, paths): Promise<boolean>          // for tests/diagnostics
    ```
-3. Commit message format exactly per DESIGN §12.1: subject from config, blank line, body
-   line `i18n-agent: auto-translation run`, trailer `X-i18n-agent: <package version>`.
+   Validation order (uniform for every ref/path-taking function): validate ref names /
+   confine paths FIRST, before spawning any git process — `fetch`, `checkout`,
+   `createBranchFrom`, `addWorktree`, `push`, and `stagePaths` each have a test proving
+   a malicious input is rejected with `GitError` and that no git process was spawned
+   (execa spy).
+3. Commit message format per DESIGN §12.1 is rendered by callers (Issue 28); this
+   module's test byte-compares a full message (subject, exactly one blank line, body
+   line, trailer `X-i18n-agent: <version>` in that order) via `git log -1 --format=%B`.
 4. **Force guard (T-FORCE)**: `push` with `forceWithLease: true` throws `GitError`
    BEFORE any network call unless `branch.startsWith(branchPrefix)`. The guard reads the
    prefix from an explicit argument (no ambient config) and is not bypassable by any
@@ -49,7 +63,9 @@ controls (DESIGN §12.1, §16 T-CMD/T-FORCE; ADR-004).
    `git check-ref-format --branch` rules (reject control chars, `..`, leading `-`, etc.)
    → `GitError` (defense in depth against config-driven ref injection).
 6. `stagePaths`: resolves each path, asserts inside root (reuse Issue 02 confinement
-   helper), passes after `--` separator. Empty list → `GitError` (programmer error).
+   helper) AND membership in `allowedPaths` (exact resolved-path match), passes after
+   `--` separator. Empty list → `GitError` (programmer error); a path in the repo but
+   outside `allowedPaths` (e.g. `src/index.ts`) → `GitError` (dedicated test).
 7. Identity: commits use `-c user.name=i18n-agent -c user.email=…` so runs don't depend
    on runner git config; committer untouched.
 8. Integration tests (real `git` binary in temp dirs — init repo, add origin as local
@@ -63,9 +79,14 @@ controls (DESIGN §12.1, §16 T-CMD/T-FORCE; ADR-004).
 
 - [ ] No shell usage anywhere (grep for `shell:` in src/git — none).
 - [ ] Force-with-lease outside the prefix is impossible (test proves remote untouched).
-- [ ] Malicious ref/path inputs rejected before any git mutation.
+- [ ] Every ref/path-taking function rejects malicious input before spawning git
+      (execa-spy tests, one per function).
+- [ ] `stagePaths` allowlist rail enforced (in-repo non-allowed file rejected).
 - [ ] Commit trailer + author identity exact (byte-compared in test).
-- [ ] All functions work on a repo whose default branch is `master` (fallback test).
+- [ ] `defaultBranch`: returns `master` when `origin/HEAD` points at it; returns
+      `main` + logs a warning when `origin/HEAD` is unreadable (two separate tests).
+- [ ] Worktree add/remove lifecycle works and `removeWorktree` succeeds on a dirty
+      temp worktree (`--force`).
 
 ## Validation
 

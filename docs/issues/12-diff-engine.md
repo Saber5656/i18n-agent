@@ -31,16 +31,23 @@ It must implement the DESIGN §9.2 decision table exactly; every row is a contra
      pending: DiffItem[];          // missing ∪ stale (translation work)
      adoptions: DiffItem[];        // lockfile writes without translation
      verbatimSync: DiffItem[] }    // non-string leaves to copy
-   computeDiff(input: { source: Catalog; targets: Map<locale, Catalog>;
+   computeDiff(input: {
+     files: Array<{ fileId: string; source: Catalog;
+                    targets: Map<string /* locale */, Catalog> }>;  // multi-file in one call
      lockfile: Lockfile; targetLocales: string[] }): DiffResult
    ```
 2. Classification implements DESIGN §9.2 rows 1–6 exactly, using `hashValue` from
-   Issue 04. Verbatim entries (meta flag from Issue 04): class `copiedVerbatim` when the
-   target value differs or is absent; `fresh`-equivalent (not listed) when identical.
-3. Missing target file (no catalog) ⇒ every source key is `missing` for that locale.
-4. Deterministic ordering: items sorted by `(fileId, source-catalog key order, locale)` —
-   the source catalog's insertion order is the canonical order (drives append order and
-   stable reports).
+   Issue 04. Lockfile precedence: `L…locales[t]` counts as **present** only when the
+   file bucket, key entry, AND locale entry all exist; absence at any level ⇒ row 4
+   (`adopted`) when the key is in S ∩ T. Verbatim entries (`isVerbatim` from Issue 04):
+   compared by raw lexical text (`entry.value`); class `copiedVerbatim` when the target
+   raw text differs or the key is absent from the target; treated as `fresh` when
+   identical. Verbatim entries never enter `pending`.
+3. Missing target file ⇒ caller passes `emptyCatalog(fileId, locale)` (Issue 05);
+   every source key is then `missing` for that locale.
+4. Deterministic ordering: items sorted by `(files[] input order, source-catalog key
+   order, targetLocales order)`; orphan items sort after all source-keyed items of the
+   same `(fileId, locale)`, in the **target** catalog's insertion order.
 5. Entries whose source value exceeds caps were already rejected by adapters; diff does
    no re-validation (single-responsibility note in code).
 6. Tests: table test with one case per DESIGN §9.2 row; bootstrap scenario (empty
@@ -52,17 +59,18 @@ It must implement the DESIGN §9.2 decision table exactly; every row is a contra
 
 ## Acceptance Criteria
 
-- [ ] Every row of DESIGN §9.2 has a named test (`row1_missing`, … `row6_verbatim`).
+- [ ] Every row of DESIGN §9.2 has a named test (`row1_missing`, … `row6_verbatim`),
+      plus dedicated branch tests `row4_missing_file_bucket`, `row4_missing_key_entry`,
+      and `row4_missing_locale_entry` for the partial-lockfile precedence rule.
 - [ ] Bootstrap produces zero `stale` and zero provider work for already-translated keys.
 - [ ] NFD-encoded source equal to NFC lockfile hash is `fresh`, not `stale`.
-- [ ] Output order is deterministic under input permutation (test).
+- [ ] Output order (incl. orphan placement) is deterministic under input permutation.
 - [ ] Function is pure: no IO, no globals, no Date/random.
 
 ## Validation
 
-- `npx vitest run tests/unit/core/diff.test.ts` green.
-- Mutation spot-check: flipping any classification condition breaks at least one test
-  (implementer runs a manual sanity mutation on rows 2/4).
+- `npx vitest run tests/unit/core/diff.test.ts` green (the named row/branch tests above
+  are the objective mutation guard).
 
 ## Dependencies
 

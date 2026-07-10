@@ -24,26 +24,34 @@ DESIGN §18).
 
 ## Detailed Requirements
 
-1. Add `@changesets/cli`; config: `access: public`, default bump patch; PRs without a
-   changeset fail a CI check unless labeled `no-changeset` (docs-only).
-2. `release.yml`: triggered by pushing tag `v*.*.*` (human act). Jobs, in order,
-   all actions SHA-pinned, workflow `permissions` minimal per job:
-   1. verify: tag matches `package.json` version (abort otherwise); full test suite;
-   2. publish: `npm publish --provenance --access public` with
-      `permissions: id-token: write` (OIDC) — npm token via repo secret `NPM_TOKEN`
-      (registry auth) documented as owner-configured manually (per owner's key-handling
+1. Add `@changesets/cli`; config: `access: public`, default bump patch. **This issue
+   edits `.github/workflows/ci.yml`** to add a `changeset-check` job: PRs without a
+   changeset fail unless the PR carries the `no-changeset` label (docs-only changes).
+2. `release.yml`: triggered by pushing tag `v*.*.*` (human act). Jobs, in order, all
+   actions SHA-pinned, with **explicit per-job permissions**:
+   1. verify (`permissions: contents: read`): tag ref parses as semver AND equals
+      `package.json` version (abort otherwise); full test suite;
+   2. publish (`permissions: contents: read, id-token: write` — OIDC provenance):
+      `npm publish --provenance --access public`; npm registry auth via repo secret
+      `NPM_TOKEN`, documented as owner-configured manually (per owner's key-handling
       rule: the agent never provisions secrets);
-   3. pin-action: script `scripts/pin-action-version.mjs` rewrites the `EXACT_VERSION`
-      literal in `action.yml` to the released version, commits to a `release/pin-<ver>`
-      branch, opens a PR (auto-created, human-merged — no direct default-branch push);
-   4. move major tag: after the pin PR merges (separate manually-triggered job or
-      follow-up step documented in RELEASING.md), force-move `v1` tag to the release
-      commit (`git tag -f v1 && git push origin v1 --force` — the ONLY sanctioned force
-      push, on a tag in our own repo, documented rationale).
+   3. pin-action (`permissions: contents: write, pull-requests: write`): script
+      `scripts/pin-action-version.mjs` rewrites the version literal in `action.yml` —
+      the ONLY accepted pattern is the string `i18n-agent@<semver-or-placeholder>`
+      inside the run step; the script fails if it finds zero or more than one match —
+      commits to a `release/pin-<ver>` branch and opens a PR (auto-created,
+      human-merged — no direct default-branch push);
+   4. move major tag (manually-triggered `workflow_dispatch` job, documented in
+      RELEASING.md; `permissions: contents: write`): **after the pin PR merges**,
+      force-move `v1` to the **pin-PR merge commit on the default branch** — NOT the
+      original tag commit — so `@v1` users always get the action with the reviewed
+      `EXACT_VERSION` baked in (DESIGN §14.1). This tag move is the ONLY sanctioned
+      force push (a tag in our own repo; rationale documented inline).
 3. `docs/RELEASING.md`: step-by-step owner runbook — changeset flow, version PR, tag,
-   the manual QA checklist (from ISSUE_PLAN §6.6): live W1 + W2 run on a scratch repo
-   with one real provider + fake provider, results pasted into the release PR;
-   npm 2FA/provenance prerequisites listed as owner tasks (DESIGN §19 U8).
+   the manual QA checklist (ISSUE_PLAN §6 item 6 / DESIGN §17): live W1 + W2 run on a
+   scratch repo with one real provider + fake provider, plus a `package-spec` canary
+   run of the action, results pasted into the release PR; npm 2FA/provenance
+   prerequisites listed as owner tasks (DESIGN §19 U8).
 4. First-publish note: publish `0.1.0` early after Wave 2 (name-squat mitigation,
    DESIGN §18) — RELEASING.md records this as a recommended owner action.
 5. Dry-run job (`workflow_dispatch`): `npm publish --dry-run` + `npm pack` artifact
@@ -51,14 +59,22 @@ DESIGN §18).
 
 ## Acceptance Criteria
 
-- [ ] Tag push runs verify → publish → pin PR chain (tested via dry-run mode /
-      `workflow_dispatch` path since real publish needs owner secrets).
-- [ ] Tag/version mismatch aborts before publish (unit-style test of the verify script).
-- [ ] `pin-action-version.mjs` rewrites only the version literal (idempotent, tested).
+- [ ] Three separately-tested release-path pieces (real publish needs owner secrets, so
+      each is unit/dry-tested): (a) tag-parse/version-match verify script — unit tests
+      incl. mismatch abort and non-semver tag; (b) publish command construction —
+      asserted via `npm publish --dry-run` in the `workflow_dispatch` dry-run job;
+      (c) pin-PR path — script unit tests + a dry mode that prints the would-be branch
+      name and diff without pushing.
+- [ ] `pin-action-version.mjs`: rewrites exactly one `i18n-agent@…` occurrence, is
+      idempotent, and fails on zero/multiple matches (all unit-tested).
+- [ ] `v1` tag-move job targets the pin-PR merge commit (job takes the merge SHA as a
+      required input; documented in RELEASING.md).
+- [ ] `changeset-check` CI job blocks changeset-less PRs without the `no-changeset`
+      label (verified on a test PR).
 - [ ] RELEASING.md covers the full runbook incl. QA checklist and owner-only secret
       steps; no step requires the agent to handle secrets.
-- [ ] All release workflow actions SHA-pinned; job permissions minimal
-      (id-token only where needed).
+- [ ] All release workflow actions SHA-pinned; the exact per-job permissions blocks
+      from requirement 2 are present (policy-test grep).
 
 ## Validation
 

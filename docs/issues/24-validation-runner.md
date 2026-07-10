@@ -28,7 +28,10 @@ quality gate over human-edited translations (workflow W3).
    validateEntry(input: { source: string; translated: string;
      profiles: PlaceholderProfileId[]; glossary: GlossaryTerm[];
      fileId: string; key: string; locale: string;
-     severities: Config["validation"]; arbPlaceholderNames?: string[] }): ValidationVerdict
+     severities: Config["validation"];
+     placeholderHints?: string[]   // adapter-neutral; runner fills it from
+                                   // entry.meta.placeholderNames when present (ARB)
+   }): ValidationVerdict
    ```
    Mapping: each validator's raw issues get severity from config
    (`placeholders|tags|icuSyntax|empty|glossary`); `"off"` skips the validator entirely;
@@ -37,9 +40,16 @@ quality gate over human-edited translations (workflow W3).
 2. `validate` command flow: config → resolve paths → parse source+targets → for every
    target entry that also exists in source, run `validateEntry`
    (glossary loaded via Issue 21; profiles = file override ?? adapter defaults) →
-   `RunReport` (`command: "validate"`, `outcome: "clean" | "partial"`), console/JSON via
-   Issue 13 renderers; issues listed per file×locale. Exit 2 if any error-severity issue,
-   else 0 (warn-only → 0). `--locale/--file` filters as in Issue 13.
+   `RunReport` (`command: "validate"`), console/JSON via Issue 13 renderers.
+   Report mapping (normative, one committed JSON example per case in the test
+   fixtures): clean → `outcome: "clean"`, all counts 0, `issues: []`, exit 0;
+   warn-only → `outcome: "clean"`, warn issues in `files[].issues`, `counts.failed: 0`,
+   exit 0; errors → `outcome: "partial"`, each error-bearing entry counted in
+   `counts.failed` and listed in `failures` (`reason: "validation"`), exit 2.
+   Filtered-out files/locales do not appear in `files[]`.
+   `--locale/--file` filter rules (restated from Issue 13, same behavior): unknown
+   locale/file id → `UsageError` exit 3 listing configured values; repeated flags
+   deduped; filters matching zero pending pairs → clean report, exit 0.
 3. `validate` never contacts providers, never writes files (read-only guarantee like
    `check`).
 4. Orphan/missing entries are NOT validation targets (diff's domain — avoid duplicate
@@ -55,8 +65,13 @@ quality gate over human-edited translations (workflow W3).
       the runner unit tests.
 - [ ] Rejection semantics verified: an `error` verdict marks `accepted: false` and the
       command reports it as failure with exit 2.
-- [ ] `validate` is read-only (tree-hash test) and provider-free (no network in test env).
-- [ ] Reports render through the shared `RunReport` machinery (no parallel format).
+- [ ] The three committed report examples (clean / warn-only / errors) match actual
+      `--json` output byte-for-byte (`satisfies RunReport` + snapshot).
+- [ ] `validate` is read-only (tree-hash test) and provider-free: the test asserts the
+      provider registry module is never imported/instantiated (module spy) and runs
+      with network disabled (`nock.disableNetConnect()` or equivalent).
+- [ ] Console output rendered via `report/console.ts` (integration test asserts the
+      shared renderer is invoked, not a parallel formatter).
 
 ## Validation
 
@@ -65,7 +80,7 @@ quality gate over human-edited translations (workflow W3).
 
 ## Dependencies
 
-02, 13, 22, 23
+02, 13, 21 (glossary loader used by the command), 22, 23
 
 ## Non-goals
 

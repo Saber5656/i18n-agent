@@ -31,31 +31,42 @@ YAML parsing of contributor-editable files is a modeled threat (DESIGN §16 T-YA
    `localeMap` reversal is handled by the caller passing the effective locale); parse
    strips it from `keyPath`s, serialize re-adds it. Mismatch → `FormatError` naming both.
    When `false`: plain nested map (Vue style).
-3. Leaf handling identical to Issue 06 (arrays → `[<index>]`, non-strings verbatim via
-   the shared meta key). YAML multiline scalars (`|`, `>`) parse to their string value;
-   serialization of *updated* multiline values may re-emit as plain/quoted scalar
-   (documented acceptable loss — record in code comment referencing DESIGN §19 U2).
+3. Leaf handling (self-contained; DESIGN §7): string scalars → entries; sequences of
+   strings → one entry per element with `[<index>]` segment; non-string scalars
+   (number/boolean/null) → `makeVerbatimEntry(keyPath, rawText)` where `rawText` is the
+   scalar's source slice from the CST node range (lexical fidelity, e.g. `1.0`, `yes`);
+   nested maps recurse into `keyPath` segments. YAML multiline scalars (`|`, `>`) parse
+   to their string value; serialization of *updated* multiline values may re-emit as
+   plain/quoted scalar (documented acceptable loss — code comment referencing DESIGN §19
+   U2). Merge keys (`<<`) are allowed but their alias expansion counts toward
+   `maxAliasCount`; exceeding the cap → `FormatError` (bomb defense).
 4. `serialize`: mutate the parsed Document in place (`setIn`/`deleteIn`/`addIn`) —
    untouched nodes keep comments/anchors/format; new keys appended at parent-end in
-   source order; `prune` deletes orphans. Emit with `doc.toString({ indent: detected }
-   )`; detect 2/4-space indent like Issue 06; single trailing newline.
+   source order; `prune` deletes orphans. Emit with `doc.toString({ indent: detected })`;
+   indent detection: first indented line's leading spaces (2 or 4; fallback 2 — tabs are
+   invalid YAML indent and yield `FormatError` from the parser); single trailing newline.
 5. `existingRaw: null` → new document with root locale key (if enabled) and detected
    default indent 2.
 6. `defaultPlaceholderProfiles: ["rails-percent", "icu", "tags"]`.
 7. Security fixtures: alias-expansion bomb (>100 aliases) rejected fast (<1 s, test with
-   timer); anchor cycle rejected by library — assert `FormatError`, not hang; 5 MiB cap
+   timer); **merge-key bomb** (`<<` chains multiplying expansion) rejected via the same
+   cap; anchor cycle rejected by library — assert `FormatError`, not hang; 5 MiB cap
    enforced before parse.
-8. Fixtures: Rails file with comments between keys, anchors/aliases legitimate use
-   (≤100), Vue-style file (`rootLocaleKey: false`), multiline scalars, unicode.
-   Conformance harness registered; churn budget accounts for the `yaml` emitter's known
-   normalizations (declare per-fixture).
+8. Fixtures: Rails file with comments between keys (`commented-rails.yml`),
+   anchors/aliases legitimate use (≤100), one legitimate `<<` merge-key file,
+   Vue-style file (`rootLocaleKey: false`), multiline scalars, non-string scalars
+   (`1.0`, `true`), unicode. Conformance harness registered via `ConformanceFixture[]`;
+   per-fixture `churnBudgetLines` declares tolerated `yaml` emitter normalizations.
 
 ## Acceptance Criteria
 
-- [ ] Comments adjacent to untouched keys are byte-preserved after a one-value edit
-      (fixture-proven).
+- [ ] `commented-rails.yml`: after editing exactly the value of `editKey`, every line of
+      the file except that value's line(s) is byte-identical (asserted by line diff in a
+      unit test — comments, anchors, spacing all intact).
 - [ ] Rails root-locale-key stripping/re-adding round-trips; locale mismatch errors.
-- [ ] Alias bomb and custom-tag fixtures throw `FormatError` within 1 s.
+- [ ] Alias bomb, merge-key bomb, and custom-tag fixtures throw `FormatError` within 1 s.
+- [ ] Non-string scalars round-trip byte-identically via raw CST slices
+      (`meta.verbatim`).
 - [ ] Conformance harness passes with declared churn budgets.
 - [ ] `rootLocaleKey: false` mode round-trips a Vue fixture.
 

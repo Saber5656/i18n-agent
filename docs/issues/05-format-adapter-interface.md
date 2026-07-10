@@ -40,14 +40,33 @@ implementation runs.
    }
    ```
    `existingRaw: null` ⇒ synthesize a new file incl. format boilerplate (DESIGN §8.2).
+   Also export `emptyCatalog(fileId: string, locale: string): Catalog` — the
+   representation of a missing target file; callers never invoke `parse` for absent
+   files (DESIGN §8.2).
 2. `registry.ts`: `const adapters: Record<FormatId, FormatAdapter>` — a static map
-   populated by direct imports (ADR-005). `getAdapter(format: FormatId)` throws
-   `FormatError` for unknown ids (defense in depth; config already validates).
+   populated by direct imports (ADR-005). `getAdapter(format: string)` (accepts `string`
+   so the unknown-id defense is testable) throws `FormatError` for unknown ids.
    Until Issues 06–10 land, entries may be `TODO` stubs throwing `FormatError("not
    implemented")` so the package always compiles.
-3. Conformance harness `defineFormatConformance(opts)`: given an adapter + a fixture set
-   (per-format file snippets provided by each adapter issue), generates `describe` blocks
-   asserting, at minimum:
+3. Conformance harness `defineFormatConformance(opts: ConformanceSpec)` with an explicit
+   fixture contract:
+   ```ts
+   export interface ConformanceSpec {
+     adapter: FormatAdapter;
+     fixtures: ConformanceFixture[];
+   }
+   export interface ConformanceFixture {
+     name: string;
+     raw: string;                    // file content (or path under tests/fixtures/)
+     locale: string; fileId: string;
+     options?: Record<string, unknown>;
+     stable: boolean;                // participates in byte round-trip check
+     churnBudgetLines?: number;      // max changed lines for a one-value edit (default 3)
+     editKey?: string;               // flatKey targeted by the churn test
+     sourceForAppend?: CatalogEntry[]; // entries appended in the append-order test
+   }
+   ```
+   The harness generates `describe` blocks asserting, at minimum:
    - parse→serialize with unchanged catalog is byte-identical (round-trip stability) for
      the adapter's `stable` fixtures;
    - updating one existing value changes only that value's line(s) (churn check via
@@ -57,24 +76,29 @@ implementation runs.
    - `existingRaw: null` produces a file that re-parses to the same catalog and contains
      the format's boilerplate;
    - resource limits from Issue 04 are enforced (oversized fixture rejected);
-   - every entry's `keyPath`/`value` survives parse(serialize(parse(x))) (idempotence).
-4. Harness self-test: a trivial in-memory JSON-lines reference adapter proves the harness
-   fails when contract rules are deliberately broken (mutation tests: reorder keys →
-   harness must fail).
+   - every entry's `keyPath`/`value` survives parse(serialize(parse(x))) (idempotence);
+   - serialized output ends with exactly one trailing `\n` (not zero, not two).
+4. Harness self-test (`tests/formats/conformance.selftest.ts`): a reference JSON-lines
+   adapter plus **eight deliberately-broken variants — one per contract rule above**
+   (reorders keys, inflates churn, prepends instead of appends, drops orphans without
+   prune, omits boilerplate, ignores limits, mutates values on round-trip, emits double
+   trailing newline); the self-test asserts the harness fails each variant
+   (`expect(...).rejects` / failing assertion captured via vitest `expect(fn).toThrow`).
 
 ## Acceptance Criteria
 
-- [ ] Interface compiles and matches DESIGN §8.1 verbatim (field names/types).
+- [ ] Interface compiles and matches DESIGN §8.1 verbatim (field names/types), plus
+      `emptyCatalog` export.
 - [ ] Registry is static; no dynamic import/require anywhere in `src/formats/`.
-- [ ] Harness covers the seven contract rules above and its self-test proves each rule
-      can fail.
-- [ ] Adapter issues 06–10 can adopt the harness by providing fixtures only (documented
-      usage comment at top of `conformance.ts`).
+- [ ] Harness covers the eight contract rules and the self-test proves each rule can
+      fail via its dedicated broken adapter variant.
+- [ ] Adapter issues 06–10 can adopt the harness by providing `ConformanceFixture[]`
+      only (documented usage comment at top of `conformance.ts`).
 
 ## Validation
 
 - `npx vitest run tests/formats` green (harness self-test).
-- `grep -R "import(" src/formats` returns nothing.
+- `grep -R -E "import\(|require\(" src/formats` returns nothing.
 
 ## Dependencies
 

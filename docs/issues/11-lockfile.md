@@ -33,15 +33,23 @@ as untrusted data (DESIGN §16 T-LOCK).
    saveLockfile(path: string, lf: Lockfile): Promise<void>
    recordTranslation(lf, fileId, flatKey, sourceHash, locale): Lockfile   // pure update
    adoptEntry(lf, fileId, flatKey, sourceHash, locale): Lockfile          // bootstrap rule
-   gc(lf, liveKeys: Map<fileId, Set<flatKey>>): Lockfile                  // DESIGN §9.2 GC
+   gc(lf, live: {
+     source: Map<string /* fileId */, Set<string /* flatKey */>>;
+     targets: Map<string /* fileId */, Map<string /* locale */, Set<string /* flatKey */>>>;
+   }): Lockfile
+   // DESIGN §9.2 GC: remove a key entry only when flatKey ∉ live.source[fileId]
+   // AND flatKey ∉ live.targets[fileId][locale] for EVERY locale; drop empty buckets.
    ```
    All update functions are pure (return new object) for testability.
 3. `saveLockfile` determinism: keys sorted lexicographically (byte order) at every level
    — files, keys, locales; 2-space indent; trailing newline. Saving twice from permuted
    in-memory maps yields identical bytes (test).
-4. Corruption handling: unreadable JSON or schema violation → `LockfileError` (exit 3)
-   whose message includes the path, the first schema issue, and the remediation hint
-   `run with --reset-lockfile to rebuild`. Never auto-delete a corrupt lockfile.
+4. Read-error taxonomy (exhaustive): `ENOENT` → empty structure (bootstrap);
+   size cap checked **before** parse; invalid JSON or schema violation →
+   `LockfileError` (exit 3) whose message includes the path, the first schema issue,
+   and the remediation hint `run with --reset-lockfile to rebuild`; any other fs error
+   (`EACCES`, `EISDIR`, …) → `LockfileError` wrapping the cause (path + errno in
+   message). Never auto-delete a corrupt lockfile.
 5. Hash strings are opaque data — never interpolated into shell/paths/prompts (T-LOCK);
    values not matching the regex are schema violations.
 6. GC rule (DESIGN §9.2): remove key entries whose flatKey is absent from the live source
@@ -61,8 +69,9 @@ as untrusted data (DESIGN §16 T-LOCK).
 
 ## Validation
 
-- `npx vitest run tests/unit/core/lockfile.test.ts` green.
-- Manual: hand-edit a fixture lockfile to `"version": 2` → command exits 3 with hint.
+- `npx vitest run tests/unit/core/lockfile.test.ts` green (includes the `"version": 2`
+  fixture → `LockfileError` with remediation hint; command-level exit-code 3 wiring is
+  validated in Issue 25's integration tests).
 
 ## Dependencies
 
